@@ -148,8 +148,12 @@ def detect_highlights(analysis: MatchAnalysis, options: DetectorOptions | None =
         enemies_alive = None
         teammates_alive = None
         if situation is not None and group.last_tick >= situation.start_tick:
-            clutch_vs = situation.enemies_alive
-            enemies_alive = situation.enemies_alive
+            # Advertise the clutch the hero actually earned: a survivor gets the
+            # whole 1vN they faced; a hero who died gets only the kills they
+            # landed (see ClutchSituation.clutch_size). This also caps the count
+            # at five, so a roster artefact can never surface as a "1v6".
+            clutch_vs = situation.clutch_size
+            enemies_alive = min(situation.enemies_alive, clutch_module.MAX_TEAM_SIZE)
             teammates_alive = 0
             tags = sorted({*tags, HighlightTag.CLUTCH}, key=lambda t: t.value)
             # An ACE stays an ACE; anything smaller is billed as the clutch.

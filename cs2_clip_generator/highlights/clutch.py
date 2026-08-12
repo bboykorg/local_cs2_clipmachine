@@ -23,6 +23,13 @@ from dataclasses import dataclass
 
 from ..core.models import KillEvent, MatchAnalysis, Player, Round, Team
 
+#: The most players a single side can field in a standard competitive round.
+#: The alive set is *reconstructed* from the match roster, so a substitution or
+#: a mid-match reconnect can leave more than five steamids attached to one team.
+#: A "1v6" is physically impossible in a 5v5 round, so the enemy count is capped
+#: here to stop that reconstruction artefact from ever being reported.
+MAX_TEAM_SIZE = 5
+
 
 @dataclass
 class ClutchSituation:
@@ -33,10 +40,27 @@ class ClutchSituation:
     enemies_alive: int
     kills_after: int
     won: bool
+    #: True when the hero was still alive at the end of the round. When it is
+    #: False the round was won some other way (bomb, time) *after* the hero
+    #: died, so the clutch is only worth what the hero personally cleared.
+    hero_survived: bool = True
+
+    @property
+    def clutch_size(self) -> int:
+        """How large a clutch to actually advertise, ``N`` in ``1vN``.
+
+        A survivor is credited with the whole situation they faced. A hero who
+        died is credited only with the enemies they personally killed, so
+        "died after 2 kills but the bomb won it" is a ``1v2``, never a ``1v5``.
+        """
+        faced = min(self.enemies_alive, MAX_TEAM_SIZE)
+        if self.hero_survived:
+            return faced
+        return max(1, min(faced, self.kills_after))
 
     @property
     def label(self) -> str:
-        return f"1v{self.enemies_alive}"
+        return f"1v{self.clutch_size}"
 
 
 def _round_roster(players: Sequence[Player], kills: Sequence[KillEvent], round_number: int) -> dict[str, Team]:
@@ -97,7 +121,10 @@ def _clutches_in_round(analysis: MatchAnalysis, round_: Round, min_enemies: int)
             hero = next(iter(survivors))
             if hero in announced:
                 continue
-            enemies_alive = len(alive[enemy])
+            # Cap the reconstructed enemy count: a competitive round can never
+            # field more than five per side, so anything larger is a roster
+            # artefact (a substitute or a reconnect), not a real "1v6".
+            enemies_alive = min(len(alive[enemy]), MAX_TEAM_SIZE)
             if enemies_alive < min_enemies:
                 continue
             announced.add(hero)
@@ -105,6 +132,12 @@ def _clutches_in_round(analysis: MatchAnalysis, round_: Round, min_enemies: int)
                 1
                 for k in kills
                 if k.tick > kill.tick and k.attacker_steamid == hero and not k.is_teamkill
+            )
+            # Did the hero live to the end, or did the round resolve after they
+            # died? A death after becoming last-alive means the clutch is only
+            # worth the kills they actually landed.
+            hero_survived = not any(
+                k.victim_steamid == hero and k.tick >= kill.tick for k in kills
             )
             won = round_.winner == team if round_.winner != Team.UNKNOWN else kills_after >= enemies_alive
             found.append(
@@ -115,6 +148,7 @@ def _clutches_in_round(analysis: MatchAnalysis, round_: Round, min_enemies: int)
                     enemies_alive=enemies_alive,
                     kills_after=kills_after,
                     won=won,
+                    hero_survived=hero_survived,
                 )
             )
 

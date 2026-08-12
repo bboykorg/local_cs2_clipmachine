@@ -158,6 +158,10 @@ class RecordingSettings(JsonMixin):
     hlae_executable: str = ""
     #: DirectShow audio device for the FFmpeg capture recorder ("" = autodetect).
     capture_audio_device: str = ""
+    #: How the FFmpeg fallback recorder grabs the screen:
+    #: "auto" -> ddagrab (DXGI, sees the Direct3D image) on Windows,
+    #: "ddagrab" forces it, "gdigrab" forces the old GDI capture (may be black).
+    capture_method: str = "auto"
     extra_launch_args: str = ""
     extra_cfg: str = ""
 

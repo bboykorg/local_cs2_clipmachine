@@ -244,14 +244,63 @@ def build_screen_capture_command(
     window_title: str | None = None,
     audio_device: str | None = None,
     duration_seconds: float | None = None,
+    method: str = "gdigrab",
+    monitor_index: int = 0,
 ) -> list[str]:
-    """Windows screen/window capture with ``gdigrab`` (the FFmpeg fallback recorder)."""
+    """Windows screen/window capture (the FFmpeg fallback recorder).
+
+    Two capture methods, because ``gdigrab`` is not enough for CS2:
+
+    * ``gdigrab`` reads the window through GDI ``BitBlt``. GDI never sees a
+      Direct3D-rendered surface, so CS2 comes out as a **black rectangle with
+      sound** — the classic symptom this recorder used to produce.
+    * ``ddagrab`` uses the DXGI Desktop Duplication API (FFmpeg 6.0+, Windows 8+).
+      It copies the *composited* desktop, Direct3D and all, so the game image is
+      actually captured. It grabs a whole monitor rather than a single window,
+      which is why borderless/fullscreen is recommended, and it hands frames off
+      on the GPU — hence the ``hwdownload`` back to system memory before encoding.
+    """
+    method = (method or "gdigrab").lower()
+    if method == "ddagrab":
+        return _build_ddagrab_command(
+            ffmpeg, output_path, settings, audio_device, duration_seconds, monitor_index
+        )
+
     args = [ffmpeg, "-hide_banner", "-y", "-f", "gdigrab", "-framerate", str(int(settings.fps))]
     if settings.width and settings.height and not window_title:
         args += ["-video_size", f"{settings.width}x{settings.height}"]
     args += ["-i", f"title={window_title}" if window_title else "desktop"]
     if audio_device:
         args += ["-f", "dshow", "-i", f"audio={audio_device}"]
+    if duration_seconds:
+        args += ["-t", f"{max(0.5, duration_seconds):.2f}"]
+    args += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"]
+    if audio_device:
+        args += ["-c:a", "aac", "-b:a", "192k"]
+    else:
+        args += ["-an"]
+    args += [str(output_path)]
+    return args
+
+
+def _build_ddagrab_command(
+    ffmpeg: str,
+    output_path: str,
+    settings: VideoSettings,
+    audio_device: str | None,
+    duration_seconds: float | None,
+    monitor_index: int,
+) -> list[str]:
+    """DXGI Desktop Duplication capture that can see the Direct3D image."""
+    args = [ffmpeg, "-hide_banner", "-y", "-init_hw_device", "d3d11va"]
+    # A dshow audio input, if any, becomes input 0 (ddagrab is a source filter
+    # and takes no ``-i`` of its own).
+    if audio_device:
+        args += ["-f", "dshow", "-i", f"audio={audio_device}"]
+    filtergraph = f"ddagrab=output_idx={int(monitor_index)}:framerate={int(settings.fps)},hwdownload,format=bgra"
+    args += ["-filter_complex", f"{filtergraph}[v]", "-map", "[v]"]
+    if audio_device:
+        args += ["-map", "0:a"]
     if duration_seconds:
         args += ["-t", f"{max(0.5, duration_seconds):.2f}"]
     args += ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"]

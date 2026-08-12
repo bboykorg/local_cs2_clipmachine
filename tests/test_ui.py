@@ -177,6 +177,24 @@ def test_settings_changes_are_saved_and_trigger_redetection(window, qt_app, load
     assert Settings.path().is_file()
 
 
+def test_resolution_combo_reflects_settings_and_never_forces_720p(window, qt_app):
+    """Regression: item data used to be a (w, h) tuple, which QComboBox.findData
+    cannot match, so the combo silently stuck on the first entry (1280x720) and
+    every save rewrote the resolution to 720p."""
+    page = window.settings_page
+    # Default video settings are 1080p; the combo must show that, not fall back
+    # to the first item.
+    assert page.resolution_combo.currentData() == "1920x1080"
+    page._save()
+    assert (window.state.settings.video.width, window.state.settings.video.height) == (1920, 1080)
+
+    # Choosing another resolution must round-trip instead of collapsing to 720p.
+    page._select(page.resolution_combo, "2560x1440")
+    qt_app.processEvents()
+    page._save()
+    assert (window.state.settings.video.width, window.state.settings.video.height) == (2560, 1440)
+
+
 def test_error_dialog_shows_reasons_without_a_traceback(qt_app):
     from cs2_clip_generator.core.errors import recording_failed
     from cs2_clip_generator.ui.widgets.error_dialog import ErrorDialog
