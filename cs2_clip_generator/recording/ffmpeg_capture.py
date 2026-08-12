@@ -1,11 +1,20 @@
 """FFmpeg screen-capture recorder — the "works with nothing installed" option.
 
-``-f gdigrab -i title=Counter-Strike 2`` captures the game window directly on
-Windows. It needs no plugin, no OBS and no HLAE, which makes it the honest
-default when nothing else is configured. The limits are real and reported rather
-than hidden: capture happens in real time (so a 20 second clip takes 20
-seconds), the window must be visible, and desktop audio needs a DirectShow
-device such as VB-Cable, because Windows has no default loopback input.
+Two capture backends live behind one recorder:
+
+* ``ddagrab`` (the default on Windows) uses the DXGI Desktop Duplication API and
+  copies the *composited* desktop, so the Direct3D image CS2 renders is actually
+  captured. It grabs a whole monitor, which is why borderless/fullscreen is the
+  right display mode for it.
+* ``gdigrab`` reads a window through GDI. It needs nothing, targets a window by
+  title, and is kept as a fallback — but GDI cannot see a Direct3D surface, so on
+  CS2 it famously produces a **black video with sound**. That is exactly why
+  ``ddagrab`` is preferred now.
+
+The other limits are real and reported rather than hidden: capture happens in
+real time (a 20 second clip takes 20 seconds), the game must be visible, and
+desktop audio needs a DirectShow device such as VB-Cable, because Windows has no
+default loopback input.
 """
 
 from __future__ import annotations
@@ -41,8 +50,19 @@ class FFmpegScreenRecorder(Recorder):
         if not self.ffmpeg.available:
             return False, "FFmpeg was not found"
         if os.name != "nt":
-            return False, "Window capture with gdigrab is Windows-only"
-        return True, "FFmpeg window capture (gdigrab)"
+            return False, "Window capture is Windows-only"
+        if self._capture_method() == "gdigrab":
+            return True, "FFmpeg window capture (gdigrab — may be black on CS2)"
+        return True, "FFmpeg desktop capture (ddagrab, DXGI — captures the Direct3D image)"
+
+    def _capture_method(self) -> str:
+        """Resolve the configured capture method to a concrete FFmpeg backend."""
+        configured = (getattr(self.settings, "capture_method", "auto") or "auto").lower()
+        if configured == "gdigrab":
+            return "gdigrab"
+        # "auto" and "ddagrab" both mean ddagrab: it is the only backend that can
+        # see the Direct3D image, so it is the honest default.
+        return "ddagrab"
 
     # -- driving ---------------------------------------------------------
     def hooks(self, context: RecordingContext) -> RecorderHooks:
@@ -52,6 +72,7 @@ class FFmpegScreenRecorder(Recorder):
         context.metadata["capture_raw"] = str(raw)
 
         audio_device = self.audio_device()
+        method = self._capture_method()
         # Record generously: playback needs a moment to settle and the tail is
         # trimmed by FFmpeg during finalise().
         duration = context.expected_duration + context.safety_margin * 2
@@ -60,9 +81,12 @@ class FFmpegScreenRecorder(Recorder):
             self.ffmpeg.ensure(),
             output_path=str(raw),
             settings=context.video,
-            window_title=CS2_WINDOW_TITLE,
+            # ddagrab captures a whole monitor and ignores the title; gdigrab
+            # still targets the CS2 window directly.
+            window_title=None if method == "ddagrab" else CS2_WINDOW_TITLE,
             audio_device=audio_device,
             duration_seconds=duration,
+            method=method,
         )
 
         def start() -> None:
@@ -110,10 +134,16 @@ class FFmpegScreenRecorder(Recorder):
             raise RecorderError(
                 title="The screen capture produced no video.",
                 reasons=[
-                    "The CS2 window was not found (is the game running?)",
-                    "The window was minimised during recording",
+                    "CS2 was not visible on the captured monitor (is the game running?)",
+                    "The game window was minimised during recording",
+                    "ddagrab needs FFmpeg 6.0+ on Windows 8 or newer",
                 ],
-                actions=["Keep CS2 visible while rendering", "Try OBS instead", "Open the logs folder"],
+                actions=[
+                    "Keep CS2 visible while rendering",
+                    "Update FFmpeg",
+                    "Try OBS instead",
+                    "Open the logs folder",
+                ],
             )
         self.ffmpeg.encode(
             input_path=str(raw),

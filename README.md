@@ -231,9 +231,16 @@ slot = (CMsgPlayerInfo.userid & 0xff) + 1      # from the "userinfo" string tabl
 | **HLAE** | `mirv_streams record start/end` + FFmpeg preset | best quality; HLAE launches CS2 |
 | **OBS** | obs-websocket `StartRecord`/`StopRecord` | real time; FFmpeg trims the margins |
 | **CS2 startmovie** | `host_framerate` + `startmovie` → TGA + WAV → FFmpeg | no extra software; needs a lot of disk (~6 MB per 1080p frame) and the plugin, because Valve hid the command |
-| **FFmpeg** | `gdigrab` window capture | always available; the CS2 window must be visible |
+| **FFmpeg** | `ddagrab` desktop capture (falls back to `gdigrab`) | always available; the CS2 window must be visible |
 
 `auto` walks that list and uses the first one that reports itself usable.
+
+> **Black video?** `gdigrab` reads a window through GDI and cannot see a
+> Direct3D surface, so on CS2 it records a black rectangle with sound. The
+> FFmpeg recorder now defaults to `ddagrab` (DXGI Desktop Duplication, FFmpeg
+> 6.0+), which captures the composited desktop — Direct3D and all. Because it
+> grabs a whole monitor, run CS2 borderless or fullscreen. Force the old
+> behaviour with `capture_method = "gdigrab"` in `settings.json` if you must.
 
 ---
 
@@ -309,9 +316,10 @@ From source: `run.bat cli analyze match.dem`.
 build.bat
 ```
 
-Installs the dev dependencies, runs the tests, and produces
-`dist\CS2ClipGenerator\CS2ClipGenerator.exe` via PyInstaller. FFmpeg is not
-bundled.
+Installs the dev dependencies, runs the tests, and produces a single windowed
+`dist\CS2ClipGenerator.exe` via PyInstaller — one file, no console window, just
+double-click it. FFmpeg is not bundled. (`run.bat` is only for running from
+source and is the one that shows a terminal.)
 
 ---
 
@@ -358,6 +366,13 @@ the cfg + hotkey backend, which needs the CS2 window in the foreground.
 **"CS2 did not write any frames."**
 `startmovie` is hidden on current CS2 builds unless the server plugin is
 enabled. Use OBS or HLAE, or enable the plugin.
+
+**The FFmpeg recording is a black screen with sound.**
+That was the old `gdigrab` window capture, which GDI cannot fill from a
+Direct3D game. The FFmpeg recorder now defaults to `ddagrab` (DXGI Desktop
+Duplication), which does capture the game image — update FFmpeg to 6.0+ and run
+CS2 borderless or fullscreen. To force the legacy path, set
+`capture_method = "gdigrab"` in `settings.json`.
 
 **"Could not connect to OBS."**
 Start OBS, enable the WebSocket server, check port and password, press **Test**.

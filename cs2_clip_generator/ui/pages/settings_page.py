@@ -350,8 +350,13 @@ class SettingsPage(QWidget):
         grid.addWidget(label("Resolution", "faint"), 0, 2)
         self.resolution_combo = QComboBox()
         for width, height in ((1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)):
-            self.resolution_combo.addItem(f"{width}x{height}", (width, height))
-        self._select(self.resolution_combo, (video.width, video.height))
+            # Item data is a plain "WxH" string, not a (width, height) tuple:
+            # QComboBox.findData cannot match a Python tuple (it compares the
+            # boxed variants by identity), so a tuple would leave the combo
+            # stuck on the first entry — which is how every render silently
+            # became 1280x720 regardless of the saved resolution.
+            self.resolution_combo.addItem(f"{width}x{height}", f"{width}x{height}")
+        self._select(self.resolution_combo, f"{video.width}x{video.height}")
         self.resolution_combo.currentIndexChanged.connect(self._save)
         grid.addWidget(self.resolution_combo, 0, 3)
 
@@ -453,6 +458,15 @@ class SettingsPage(QWidget):
         if index >= 0:
             combo.setCurrentIndex(index)
 
+    def _selected_resolution(self, fallback: tuple[int, int]) -> tuple[int, int]:
+        """Parse the ``"WxH"`` item data back into an ``(int, int)`` pair."""
+        data = self.resolution_combo.currentData()
+        try:
+            width, height = str(data).lower().split("x")
+            return int(width), int(height)
+        except (AttributeError, ValueError):
+            return fallback
+
     def _save(self) -> None:
         paths = self.settings.paths
         paths.cs2_executable = self.cs2_field.text().strip()
@@ -490,8 +504,7 @@ class SettingsPage(QWidget):
             clips.lead_out[kind] = spin.value()
 
         video = self.settings.video
-        width, height = self.resolution_combo.currentData() or (video.width, video.height)
-        video.width, video.height = width, height
+        video.width, video.height = self._selected_resolution((video.width, video.height))
         video.fps = self.fps_combo.currentData() or video.fps
         video.codec = self.codec_combo.currentData() or video.codec
         video.bitrate_kbps = self.bitrate_spin.value()
@@ -512,7 +525,7 @@ class SettingsPage(QWidget):
         if preset and preset != "custom":
             self.settings.apply_quality_preset(preset)
             video = self.settings.video
-            self._select(self.resolution_combo, (video.width, video.height))
+            self._select(self.resolution_combo, f"{video.width}x{video.height}")
             self._select(self.fps_combo, video.fps)
             self._select(self.codec_combo, video.codec)
             self.bitrate_spin.setValue(video.bitrate_kbps)

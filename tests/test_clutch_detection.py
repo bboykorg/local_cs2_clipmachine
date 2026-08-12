@@ -108,3 +108,57 @@ def test_alive_counts_track_deaths_within_the_round():
     assert alive_counts_at(analysis, 1, 900) == (5, 5)
     assert alive_counts_at(analysis, 1, 1_050) == (4, 5)
     assert alive_counts_at(analysis, 1, 1_200) == (3, 5)
+
+
+def test_a_1v6_roster_artifact_is_capped_to_1v5():
+    """A substitute or reconnect can leave six steamids on one side; a round
+    can never really be a 1v6, so the enemy count is capped at five."""
+    from cs2_clip_generator.core.models import Player
+
+    phantom_sub = Player(steamid="76561198000000011", name="P11", team=Team.CT, slot=11)
+    kills = [
+        _ct_kills_t(1_000, T_PLAYERS[1]),
+        _ct_kills_t(1_100, T_PLAYERS[2]),
+        _ct_kills_t(1_200, T_PLAYERS[3]),
+        _ct_kills_t(1_300, T_PLAYERS[4]),  # P1 is now alone against a 6-strong roster
+        *[_t_kills_ct(1_400 + index * 100, CT_PLAYERS[index]) for index in range(5)],
+    ]
+    analysis = make_analysis(kills)
+    analysis.players = [*analysis.players, phantom_sub]
+    analysis.rounds[0].winner = Team.T
+
+    clutches = find_clutches(analysis)
+    assert len(clutches) == 1
+    assert clutches[0].enemies_alive == 5  # capped, never 6
+    assert clutches[0].clutch_size == 5
+    assert clutches[0].label == "1v5"
+
+
+def test_a_clutch_won_after_the_hero_dies_is_billed_by_kills():
+    """The hero died after two kills; the bomb won the round. That is a 1v2,
+    not a 1v5 — the clutch is only worth what the hero personally cleared."""
+    kills = [
+        _ct_kills_t(1_000, T_PLAYERS[1]),
+        _ct_kills_t(1_100, T_PLAYERS[2]),
+        _ct_kills_t(1_200, T_PLAYERS[3]),
+        _ct_kills_t(1_300, T_PLAYERS[4]),  # P1 alone against 5 CTs
+        _t_kills_ct(1_400, CT_PLAYERS[0]),
+        _t_kills_ct(1_500, CT_PLAYERS[1]),  # P1 gets two...
+        _ct_kills_t(1_600, T_PLAYERS[0], attacker=CT_PLAYERS[2]),  # ...then dies
+    ]
+    analysis = make_analysis(kills)
+    analysis.rounds[0].winner = Team.T  # bomb detonates: T wins even though P1 is dead
+
+    clutches = find_clutches(analysis)
+    assert len(clutches) == 1
+    situation = clutches[0]
+    assert situation.hero_survived is False
+    assert situation.kills_after == 2
+    assert situation.clutch_size == 2  # billed by kills, not by the five faced
+    assert situation.label == "1v2"
+
+    highlights = detect_highlights(analysis, DetectorOptions.defaults())
+    hero = next(h for h in highlights if h.player_steamid == T_PLAYERS[0])
+    assert hero.kind == HighlightKind.CLUTCH
+    assert hero.clutch_vs == 2
+    assert "1v2" in hero.title

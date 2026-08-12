@@ -90,6 +90,30 @@ def test_screen_capture_targets_the_cs2_window():
     assert args[args.index("-t") + 1] == "10.00"
 
 
+def test_ddagrab_capture_uses_desktop_duplication_and_downloads_frames():
+    """ddagrab is the fix for the black CS2 capture: it must init a d3d11 device
+    and pull the GPU frames back before encoding."""
+    args = build_screen_capture_command(
+        "ffmpeg", "out.mp4", VideoSettings(fps=60), duration_seconds=10, method="ddagrab"
+    )
+    assert "gdigrab" not in args
+    assert args[args.index("-init_hw_device") + 1] == "d3d11va"
+    graph = args[args.index("-filter_complex") + 1]
+    assert "ddagrab=output_idx=0:framerate=60" in graph
+    assert "hwdownload" in graph and "format=bgra" in graph
+    assert args[args.index("-t") + 1] == "10.00"
+    assert "libx264" in args
+
+
+def test_ddagrab_maps_dshow_audio_as_the_first_input():
+    args = build_screen_capture_command(
+        "ffmpeg", "out.mp4", VideoSettings(fps=60), audio_device="CABLE Output", method="ddagrab"
+    )
+    assert args[args.index("-i") + 1] == "audio=CABLE Output"
+    assert "0:a" in args  # dshow audio is input 0; ddagrab is a source filter
+    assert "aac" in args
+
+
 def test_concat_list_quotes_and_normalises_paths(tmp_path):
     first = tmp_path / "a b.mp4"
     first.write_bytes(b"x")

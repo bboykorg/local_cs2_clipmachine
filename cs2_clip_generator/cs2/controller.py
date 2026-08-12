@@ -48,8 +48,15 @@ CLIP_CFG_NAME = "cs2clip_clip"
 # ``+exec`` and the netcon port become available well before a large demo has
 # finished loading.  Sending demo_gototick immediately at that point is silently
 # ignored by CS2, after which the recorder captures the start of the match.
-DEMO_STARTUP_GRACE_SECONDS = 12.0
-MIN_SEEK_SETTLE_SECONDS = 4.0
+#
+# These are the two blind waits that made playback feel sluggish between clips.
+# They are kept deliberately modest and are backed up by other safety nets — the
+# port is polled until it answers, and the very first seek is issued twice — so
+# they no longer need the large margins they once carried. The per-seek settle
+# also honours the user's ``stabilisation_seconds`` setting, so it can be tuned
+# up on a slow machine without editing code.
+DEMO_STARTUP_GRACE_SECONDS = 6.0
+MIN_SEEK_SETTLE_SECONDS = 1.5
 
 
 @dataclass
@@ -399,13 +406,13 @@ class NetconPlaybackController(PlaybackController):
             time.sleep(seek_wait)
         console.send(demo_controller.pause())
         self._first_clip = False
-        time.sleep(0.4)
+        time.sleep(0.25)
 
         camera = PlayerPovCameraController(clip.camera_mode)
         for keyframe in camera.plan(_as_highlight_stub(clip), clip.target, clip.tickrate):
             if keyframe.tick <= clip.start_tick + int(clip.tickrate):
                 console.send_all(keyframe.commands)
-        time.sleep(0.4)
+        time.sleep(0.25)
 
         if hooks.start_commands:
             console.send_all(hooks.start_commands)
