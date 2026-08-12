@@ -1,0 +1,28 @@
+# Runtime dependencies for CS2 Clip Generator (Windows 10/11 x64, Python 3.11+)
+
+# --- required -------------------------------------------------------------
+# Desktop UI.
+PySide6-Essentials>=6.6,<7
+
+# CS2 (Source 2) demo parsing. Rust extension, reads current PBDEMS2 demos.
+demoparser2>=0.42,<1
+
+# demoparser2 returns DataFrames.
+pandas>=2.0
+
+# Snappy decompression for the demo container reader (spectator slots).
+cramjam>=2.8
+
+# Process and hardware inspection (falls back to OS tools when missing).
+psutil>=5.9
+
+# --- optional -------------------------------------------------------------
+# Control OBS Studio over obs-websocket v5. Without it the OBS recorder
+# reports itself as unavailable and another backend is used.
+obsws-python>=1.6 ; python_version >= "3.9"
+
+# --- external programs (not pip installable) ------------------------------
+# FFmpeg      required   https://www.gyan.dev/ffmpeg/builds/
+# CS2         required   installed through Steam
+# OBS Studio  optional   https://obsproject.com/download
+# HLAE        optional   https://github.com/advancedfx/advancedfx/releases
